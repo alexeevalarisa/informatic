@@ -4,7 +4,6 @@
   "description": "Платформа для уроков по информатике",
   "main": "api/index.js",
   "scripts": {
-    "dev": "vercel dev",
     "start": "node api/index.js"
   },
   "dependencies": {
@@ -13,9 +12,7 @@
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.0",
-    "multer": "^1.4.5-lts.1"
-  },
-  "devDependencies": {
-    "vercel": "^32.0.0"
+    "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.6"
   }
 }
