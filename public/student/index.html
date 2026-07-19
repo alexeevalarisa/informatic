@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход для ученика — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="text-center mb-24">
+        <div style="font-size:48px;margin-bottom:12px;">👨‍🎓</div>
+        <h2>Вход для ученика</h2>
+        <div class="role-badge">Личный кабинет</div>
+      </div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label>Логин</label>
+          <input type="text" id="login-username" required placeholder="Введите логин">
+        </div>
+        <div class="form-group">
+          <label>Пароль</label>
+          <input type="password" id="login-password" required placeholder="Введите пароль">
+        </div>
+        <div id="login-error" class="error-msg"></div>
+        <button type="submit" class="btn btn-success btn-block">Войти</button>
+      </form>
+
+      <a href="/" class="back-link">← На главную</a>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const errorEl = document.getElementById('login-error');
+      errorEl.classList.remove('show');
+
+      try {
+        const data = await api('/auth/login', {
+          method: 'POST',
+          body: {
+            username: document.getElementById('login-username').value,
+            password: document.getElementById('login-password').value
+          }
+        });
+        if (data.user.role !== 'student') {
+          errorEl.textContent = 'Эта страница только для учеников';
+          errorEl.classList.add('show');
+          return;
+        }
+        setAuth(data.token, data.user);
+        window.location.href = '/student/dashboard.html';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.add('show');
+      }
+    });
+  </script>
+</body>
+</html>

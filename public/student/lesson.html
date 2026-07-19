@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Урок — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Личный кабинет</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/student/dashboard.html"><span class="icon">📚</span> Мои уроки</a></li>
+        <li><a href="/student/submissions.html"><span class="icon">📝</span> Мои ответы</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Ученик</div>
+            <div class="user-role">Ученик</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1 id="lesson-title">Урок</h1>
+        <button class="btn btn-secondary" onclick="history.back()">← Назад</button>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <div class="card-title mb-16">📎 Материалы урока</div>
+            <div id="files-container">
+              <div class="empty-state" style="padding:24px;">
+                <div class="icon" style="font-size:32px;">📎</div>
+                <p>Нет прикреплённых файлов</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title mb-16">📝 Содержание урока</div>
+            <div id="lesson-content" style="line-height:1.8;white-space:pre-wrap;"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title mb-16">✏️ Отправить ответ</div>
+            <form id="submit-form">
+              <div class="form-group">
+                <label>Текст ответа</label>
+                <textarea id="answer-text" rows="6" placeholder="Ваш ответ на задание..."></textarea>
+              </div>
+              <div class="form-group">
+                <label>Прикрепить файл</label>
+                <input type="file" id="answer-file">
+              </div>
+              <button type="submit" class="btn btn-success btn-block">📤 Отправить ответ</button>
+            </form>
+          </div>
+
+          <div class="card" id="my-submission-card" style="display:none;">
+            <div class="card-title mb-16">📋 Мой ответ</div>
+            <div id="my-submission-content"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'student') window.location.href = '/student/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const lessonId = urlParams.get('id');
+    if (!lessonId) window.location.href = '/student/dashboard.html';
+
+    async function loadLesson() {
+      try {
+        const lesson = await api('/lessons/' + lessonId);
+        document.getElementById('lesson-title').textContent = lesson.title;
+        document.getElementById('lesson-content').textContent = lesson.content || 'Нет содержания';
+
+        const filesContainer = document.getElementById('files-container');
+        if (lesson.files && lesson.files.length > 0) {
+          filesContainer.innerHTML = lesson.files.map(f => `
+            <div class="file-item">
+              <span class="file-icon">📄</span>
+              <span class="file-name">${escapeHtml(f.name)}</span>
+              <span class="file-size">${(f.size / 1024).toFixed(1)} КБ</span>
+              <a href="/api/files/${lessonId}/${f.id}" class="btn btn-secondary btn-sm">⬇️ Скачать</a>
+            </div>
+          `).join('');
+        }
+
+        loadMySubmission();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    async function loadMySubmission() {
+      try {
+        const submissions = await api('/my-submissions');
+        const mySub = submissions.find(s => s.lessonId === lessonId);
+        if (mySub) {
+          const card = document.getElementById('my-submission-card');
+          card.style.display = 'block';
+          document.getElementById('my-submission-content').innerHTML = `
+            <p><strong>Отправлено:</strong> ${formatDate(mySub.submittedAt)}</p>
+            ${mySub.text ? `<p style="margin-top:8px;">${escapeHtml(mySub.text)}</p>` : ''}
+            ${mySub.file ? `<a href="/api/submissions/${mySub.id}/file" class="btn btn-secondary btn-sm mt-16">📎 ${escapeHtml(mySub.file.name)}</a>` : ''}
+            ${mySub.grade ? `
+              <div style="margin-top:16px;padding:16px;background:#f0fdf4;border-radius:8px;">
+                <div style="font-size:24px;font-weight:700;color:#166534;">Оценка: ${mySub.grade}</div>
+                ${mySub.feedback ? `<p style="margin-top:8px;color:#166534;">💬 ${escapeHtml(mySub.feedback)}</p>` : ''}
+              </div>
+            ` : '<p style="margin-top:12px;color:var(--text-light);">⏳ Ожидает проверки</p>'}
+          `;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    document.getElementById('submit-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const formData = new FormData();
+      formData.append('text', document.getElementById('answer-text').value);
+      const fileInput = document.getElementById('answer-file');
+      if (fileInput.files[0]) formData.append('file', fileInput.files[0]);
+
+      try {
+        await fetch(API_URL + '/lessons/' + lessonId + '/submissions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + getToken() },
+          body: formData
+        });
+        showToast('Ответ отправлен!', 'success');
+        document.getElementById('submit-form').reset();
+        loadMySubmission();
+      } catch (err) {
+        showToast('Ошибка отправки', 'error');
+      }
+    });
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadLesson();
+  </script>
+</body>
+</html>

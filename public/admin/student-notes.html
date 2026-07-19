@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Заметки ученика — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Панель учителя</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/admin/dashboard.html"><span class="icon">📊</span> Обзор</a></li>
+        <li><a href="/admin/classes.html"><span class="icon">🏫</span> Классы</a></li>
+        <li><a href="/admin/students.html"><span class="icon">👨‍🎓</span> Ученики</a></li>
+        <li><a href="/admin/lessons.html"><span class="icon">📚</span> Уроки</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Учитель</div>
+            <div class="user-role">Администратор</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <div>
+          <h1 id="student-name">Ученик</h1>
+          <p style="color:var(--text-light);margin-top:4px;">Личные заметки (видны только вам)</p>
+        </div>
+        <button class="btn btn-primary" onclick="history.back()">← Назад</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📝 Заметки</div>
+          <button class="btn btn-primary btn-sm" onclick="openModal('add-note-modal')">+ Добавить заметку</button>
+        </div>
+        <div id="notes-container">
+          <div class="empty-state">
+            <div class="icon">📝</div>
+            <h3>Нет заметок</h3>
+            <p>Добавьте первую заметку об ученике</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="add-note-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Новая заметка</h3>
+        <button class="modal-close" onclick="closeModal('add-note-modal')">&times;</button>
+      </div>
+      <form id="add-note-form">
+        <div class="form-group">
+          <label>Текст заметки</label>
+          <textarea id="note-content" rows="4" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('add-note-modal')">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'admin') window.location.href = '/admin/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const studentId = urlParams.get('id');
+    const studentName = urlParams.get('name') || 'Ученик';
+    const classId = urlParams.get('classId');
+
+    document.getElementById('student-name').textContent = decodeURIComponent(studentName);
+
+    async function loadNotes() {
+      try {
+        const notes = await api('/notes?studentId=' + studentId);
+        const container = document.getElementById('notes-container');
+        if (notes.length > 0) {
+          container.innerHTML = notes.map(n => `
+            <div class="note-item">
+              <div class="note-date">${formatDate(n.createdAt)}</div>
+              <div class="note-text">${escapeHtml(n.content)}</div>
+              <button class="note-delete" onclick="deleteNote('${n.id}')">&times;</button>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    document.getElementById('add-note-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        await api('/notes', {
+          method: 'POST',
+          body: {
+            studentId: studentId,
+            classId: classId,
+            content: document.getElementById('note-content').value
+          }
+        });
+        closeModal('add-note-modal');
+        document.getElementById('add-note-form').reset();
+        showToast('Заметка сохранена!', 'success');
+        loadNotes();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    async function deleteNote(id) {
+      if (!confirm('Удалить заметку?')) return;
+      try {
+        await api('/notes/' + id, { method: 'DELETE' });
+        showToast('Заметка удалена', 'success');
+        loadNotes();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadNotes();
+  </script>
+</body>
+</html>

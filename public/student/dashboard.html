@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Мои уроки — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Личный кабинет</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/student/dashboard.html" class="active"><span class="icon">📚</span> Мои уроки</a></li>
+        <li><a href="/student/submissions.html"><span class="icon">📝</span> Мои ответы</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Ученик</div>
+            <div class="user-role">Ученик</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Мои уроки</h1>
+      </div>
+
+      <div id="lessons-container">
+        <div class="empty-state">
+          <div class="icon">📚</div>
+          <h3>Пока нет уроков</h3>
+          <p>Учитель ещё не добавил уроки для вашего класса</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'student') window.location.href = '/student/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    async function loadLessons() {
+      try {
+        if (!user.classId) {
+          showToast('Вы не привязаны к классу', 'error');
+          return;
+        }
+        const lessons = await api('/classes/' + user.classId + '/lessons');
+        const container = document.getElementById('lessons-container');
+
+        if (lessons.length === 0) return;
+
+        container.innerHTML = '<div class="grid-2">' + lessons.map(l => `
+          <div class="lesson-card" onclick="location.href='/student/lesson.html?id=${l.id}'">
+            <h3>${escapeHtml(l.title)}</h3>
+            <p>${escapeHtml(l.description || 'Без описания')}</p>
+            <span style="font-size:12px;color:var(--text-light);">📅 ${formatDate(l.createdAt)}</span>
+          </div>
+        `).join('') + '</div>';
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadLessons();
+  </script>
+</body>
+</html>

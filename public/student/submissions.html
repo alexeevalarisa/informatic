@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Мои ответы — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Личный кабинет</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/student/dashboard.html"><span class="icon">📚</span> Мои уроки</a></li>
+        <li><a href="/student/submissions.html" class="active"><span class="icon">📝</span> Мои ответы</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Ученик</div>
+            <div class="user-role">Ученик</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Мои ответы и оценки</h1>
+      </div>
+
+      <div id="submissions-container">
+        <div class="empty-state">
+          <div class="icon">📝</div>
+          <h3>Пока нет ответов</h3>
+          <p>Отправьте ответ на урок, чтобы увидеть оценку</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'student') window.location.href = '/student/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    async function loadSubmissions() {
+      try {
+        const submissions = await api('/my-submissions');
+        const container = document.getElementById('submissions-container');
+
+        if (submissions.length === 0) return;
+
+        const lessons = await api('/classes/' + user.classId + '/lessons');
+        const lessonMap = {};
+        lessons.forEach(l => lessonMap[l.id] = l.title);
+
+        container.innerHTML = submissions.map(s => `
+          <div class="submission-card">
+            <div class="student-name">${escapeHtml(lessonMap[s.lessonId] || 'Урок')}</div>
+            <div class="submitted-at">📅 Отправлено: ${formatDate(s.submittedAt)}</div>
+            ${s.text ? `<p style="margin-bottom:12px;">${escapeHtml(s.text)}</p>` : ''}
+            ${s.file ? `<a href="/api/submissions/${s.id}/file" class="btn btn-secondary btn-sm mb-16">📎 ${escapeHtml(s.file.name)}</a>` : ''}
+            ${s.grade ? `
+              <div style="padding:16px;background:#f0fdf4;border-radius:8px;">
+                <div style="font-size:24px;font-weight:700;color:#166534;">Оценка: ${s.grade}</div>
+                ${s.feedback ? `<p style="margin-top:8px;color:#166534;">💬 ${escapeHtml(s.feedback)}</p>` : ''}
+              </div>
+            ` : '<p style="color:var(--text-light);">⏳ Ожидает проверки учителем</p>'}
+          </div>
+        `).join('');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadSubmissions();
+  </script>
+</body>
+</html>

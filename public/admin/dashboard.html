@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Панель управления — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Панель учителя</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/admin/dashboard.html" class="active"><span class="icon">📊</span> Обзор</a></li>
+        <li><a href="/admin/classes.html"><span class="icon">🏫</span> Классы</a></li>
+        <li><a href="/admin/students.html"><span class="icon">👨‍🎓</span> Ученики</a></li>
+        <li><a href="/admin/lessons.html"><span class="icon">📚</span> Уроки</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Учитель</div>
+            <div class="user-role">Администратор</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Обзор</h1>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon blue">🏫</div>
+          <div>
+            <div class="stat-value" id="stat-classes">0</div>
+            <div class="stat-label">Классов</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green">👨‍🎓</div>
+          <div>
+            <div class="stat-value" id="stat-students">0</div>
+            <div class="stat-label">Учеников</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon yellow">📚</div>
+          <div>
+            <div class="stat-value" id="stat-lessons">0</div>
+            <div class="stat-label">Уроков</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon purple">📝</div>
+          <div>
+            <div class="stat-value" id="stat-submissions">0</div>
+            <div class="stat-label">Ответов</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Последние классы</div>
+          <a href="/admin/classes.html" class="btn btn-primary btn-sm">Все классы →</a>
+        </div>
+        <div id="recent-classes">
+          <div class="empty-state">
+            <div class="icon">🏫</div>
+            <h3>Пока нет классов</h3>
+            <p>Создайте первый класс, чтобы начать работу</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    // Проверка авторизации
+    const user = getUser();
+    if (!user || user.role !== 'admin') {
+      window.location.href = '/admin/';
+    } else {
+      document.getElementById('user-name').textContent = user.name || user.username;
+    }
+
+    // Загрузка статистики
+    async function loadStats() {
+      try {
+        const stats = await api('/stats');
+        document.getElementById('stat-classes').textContent = stats.totalClasses;
+        document.getElementById('stat-students').textContent = stats.totalStudents;
+        document.getElementById('stat-lessons').textContent = stats.totalLessons;
+        document.getElementById('stat-submissions').textContent = stats.totalSubmissions;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Загрузка последних классов
+    async function loadRecentClasses() {
+      try {
+        const classes = await api('/classes');
+        const container = document.getElementById('recent-classes');
+
+        if (classes.length === 0) return;
+
+        container.innerHTML = '<div class="grid-3">' + classes.slice(0, 3).map(c => `
+          <div class="class-card" onclick="location.href='/admin/class-detail.html?id=${c.id}'">
+            <div class="class-name">${escapeHtml(c.name)}</div>
+            <div class="class-desc">${escapeHtml(c.description || 'Без описания')}</div>
+            <div class="class-meta">
+              <span>📅 ${formatDate(c.createdAt)}</span>
+            </div>
+          </div>
+        `).join('') + '</div>';
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadStats();
+    loadRecentClasses();
+  </script>
+</body>
+</html>

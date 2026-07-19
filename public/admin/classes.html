@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Классы — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Панель учителя</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/admin/dashboard.html"><span class="icon">📊</span> Обзор</a></li>
+        <li><a href="/admin/classes.html" class="active"><span class="icon">🏫</span> Классы</a></li>
+        <li><a href="/admin/students.html"><span class="icon">👨‍🎓</span> Ученики</a></li>
+        <li><a href="/admin/lessons.html"><span class="icon">📚</span> Уроки</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Учитель</div>
+            <div class="user-role">Администратор</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Классы</h1>
+        <button class="btn btn-primary" onclick="openModal('create-class-modal')">+ Новый класс</button>
+      </div>
+
+      <div id="classes-container">
+        <div class="empty-state">
+          <div class="icon">🏫</div>
+          <h3>Пока нет классов</h3>
+          <p>Нажмите «Новый класс», чтобы создать первый класс</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal: Create Class -->
+  <div class="modal-overlay" id="create-class-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Создать класс</h3>
+        <button class="modal-close" onclick="closeModal('create-class-modal')">&times;</button>
+      </div>
+      <form id="create-class-form">
+        <div class="form-group">
+          <label>Название класса *</label>
+          <input type="text" id="class-name" required placeholder="Например: 9А">
+        </div>
+        <div class="form-group">
+          <label>Описание</label>
+          <textarea id="class-desc" rows="3" placeholder="Описание класса..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-class-modal')">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'admin') window.location.href = '/admin/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    async function loadClasses() {
+      try {
+        const classes = await api('/classes');
+        const container = document.getElementById('classes-container');
+
+        if (classes.length === 0) return;
+
+        container.innerHTML = '<div class="grid-3">' + classes.map(c => `
+          <div class="class-card" onclick="location.href='/admin/class-detail.html?id=${c.id}'">
+            <div class="class-name">${escapeHtml(c.name)}</div>
+            <div class="class-desc">${escapeHtml(c.description || 'Без описания')}</div>
+            <div class="class-meta">
+              <span>📅 ${formatDate(c.createdAt)}</span>
+            </div>
+          </div>
+        `).join('') + '</div>';
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    document.getElementById('create-class-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        await api('/classes', {
+          method: 'POST',
+          body: {
+            name: document.getElementById('class-name').value,
+            description: document.getElementById('class-desc').value
+          }
+        });
+        closeModal('create-class-modal');
+        document.getElementById('create-class-form').reset();
+        showToast('Класс создан!', 'success');
+        loadClasses();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadClasses();
+  </script>
+</body>
+</html>

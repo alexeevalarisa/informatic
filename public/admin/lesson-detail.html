@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Урок — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Панель учителя</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/admin/dashboard.html"><span class="icon">📊</span> Обзор</a></li>
+        <li><a href="/admin/classes.html"><span class="icon">🏫</span> Классы</a></li>
+        <li><a href="/admin/students.html"><span class="icon">👨‍🎓</span> Ученики</a></li>
+        <li><a href="/admin/lessons.html" class="active"><span class="icon">📚</span> Уроки</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Учитель</div>
+            <div class="user-role">Администратор</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <div>
+          <h1 id="lesson-title">Урок</h1>
+          <p id="lesson-desc" style="color:var(--text-light);margin-top:4px;"></p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" onclick="openModal('edit-lesson-modal')">✏️ Редактировать</button>
+          <button class="btn btn-danger" onclick="deleteLesson()">🗑 Удалить</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">📎 Файлы урока</div>
+              <button class="btn btn-primary btn-sm" onclick="document.getElementById('file-input').click()">+ Загрузить файл</button>
+            </div>
+            <input type="file" id="file-input" style="display:none" onchange="uploadFile(this.files[0])">
+            <div id="files-container">
+              <div class="empty-state">
+                <div class="icon">📎</div>
+                <h3>Нет файлов</h3>
+                <p>Загрузите презентации, задания и другие материалы</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title mb-16">📝 Содержание урока</div>
+            <div id="lesson-content" style="line-height:1.8;white-space:pre-wrap;"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">📋 Ответы учеников</div>
+            </div>
+            <div id="submissions-container">
+              <div class="empty-state">
+                <div class="icon">📝</div>
+                <h3>Пока нет ответов</h3>
+                <p>Ученики ещё не отправили задания</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="edit-lesson-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Редактировать урок</h3>
+        <button class="modal-close" onclick="closeModal('edit-lesson-modal')">&times;</button>
+      </div>
+      <form id="edit-lesson-form">
+        <div class="form-group">
+          <label>Название</label>
+          <input type="text" id="edit-title" required>
+        </div>
+        <div class="form-group">
+          <label>Описание</label>
+          <textarea id="edit-desc" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Содержание</label>
+          <textarea id="edit-content" rows="6"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('edit-lesson-modal')">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="grade-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Оценить работу</h3>
+        <button class="modal-close" onclick="closeModal('grade-modal')">&times;</button>
+      </div>
+      <form id="grade-form">
+        <input type="hidden" id="grade-submission-id">
+        <div class="form-group">
+          <label>Оценка</label>
+          <select id="grade-value" required>
+            <option value="">Выберите...</option>
+            <option value="5">5 (отлично)</option>
+            <option value="4">4 (хорошо)</option>
+            <option value="3">3 (удовлетворительно)</option>
+            <option value="2">2 (неудовлетворительно)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Комментарий</label>
+          <textarea id="grade-feedback" rows="3" placeholder="Обратная связь для ученика..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('grade-modal')">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить оценку</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'admin') window.location.href = '/admin/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const lessonId = urlParams.get('id');
+    if (!lessonId) window.location.href = '/admin/lessons.html';
+
+    let currentLesson = null;
+
+    async function loadLesson() {
+      try {
+        const lesson = await api('/lessons/' + lessonId);
+        currentLesson = lesson;
+        document.getElementById('lesson-title').textContent = lesson.title;
+        document.getElementById('lesson-desc').textContent = lesson.description || '';
+        document.getElementById('lesson-content').textContent = lesson.content || 'Нет содержания';
+
+        document.getElementById('edit-title').value = lesson.title;
+        document.getElementById('edit-desc').value = lesson.description || '';
+        document.getElementById('edit-content').value = lesson.content || '';
+
+        const filesContainer = document.getElementById('files-container');
+        if (lesson.files && lesson.files.length > 0) {
+          filesContainer.innerHTML = lesson.files.map(f => `
+            <div class="file-item">
+              <span class="file-icon">📄</span>
+              <span class="file-name">${escapeHtml(f.name)}</span>
+              <span class="file-size">${(f.size / 1024).toFixed(1)} КБ</span>
+              <a href="/api/files/${lessonId}/${f.id}" class="btn btn-secondary btn-sm">⬇️</a>
+              <button class="btn btn-danger btn-sm" onclick="deleteFile('${f.id}')">🗑</button>
+            </div>
+          `).join('');
+        }
+
+        loadSubmissions();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    async function loadSubmissions() {
+      try {
+        const submissions = await api('/lessons/' + lessonId + '/submissions');
+        const container = document.getElementById('submissions-container');
+
+        if (submissions.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">📝</div>
+              <h3>Пока нет ответов</h3>
+              <p>Ученики ещё не отправили задания</p>
+            </div>`;
+          return;
+        }
+
+        container.innerHTML = submissions.map(s => `
+          <div class="submission-card">
+            <div class="student-name">${escapeHtml(s.studentName)}</div>
+            <div class="submitted-at">📅 ${formatDate(s.submittedAt)}</div>
+            ${s.text ? `<p style="margin-bottom:12px;">${escapeHtml(s.text)}</p>` : ''}
+            ${s.file ? `<a href="/api/submissions/${s.id}/file" class="btn btn-secondary btn-sm mb-16">📎 ${escapeHtml(s.file.name)}</a>` : ''}
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <span class="grade-badge grade-${s.grade || 'null'}">${s.grade ? 'Оценка: ' + s.grade : 'Без оценки'}</span>
+              ${s.feedback ? `<span style="font-size:13px;color:var(--text-light);">💬 ${escapeHtml(s.feedback)}</span>` : ''}
+              <button class="btn btn-primary btn-sm" onclick="openGradeModal('${s.id}', ${s.grade || 'null'}, '${escapeHtml(s.feedback || '')}')">
+                ${s.grade ? '✏️ Изменить' : '⭐ Оценить'}
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function uploadFile(file) {
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        await fetch(API_URL + '/lessons/' + lessonId + '/files', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + getToken() },
+          body: formData
+        });
+        showToast('Файл загружен!', 'success');
+        loadLesson();
+      } catch (err) {
+        showToast('Ошибка загрузки файла', 'error');
+      }
+    }
+
+    async function deleteFile(fileId) {
+      if (!confirm('Удалить файл?')) return;
+      try {
+        await api('/lessons/' + lessonId + '/files/' + fileId, { method: 'DELETE' });
+        showToast('Файл удалён', 'success');
+        loadLesson();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    document.getElementById('edit-lesson-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        await api('/lessons/' + lessonId, {
+          method: 'PUT',
+          body: {
+            title: document.getElementById('edit-title').value,
+            description: document.getElementById('edit-desc').value,
+            content: document.getElementById('edit-content').value
+          }
+        });
+        closeModal('edit-lesson-modal');
+        showToast('Урок обновлён!', 'success');
+        loadLesson();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    function openGradeModal(submissionId, currentGrade, currentFeedback) {
+      document.getElementById('grade-submission-id').value = submissionId;
+      document.getElementById('grade-value').value = currentGrade === 'null' ? '' : currentGrade;
+      document.getElementById('grade-feedback').value = currentFeedback;
+      openModal('grade-modal');
+    }
+
+    document.getElementById('grade-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        await api('/submissions/' + document.getElementById('grade-submission-id').value + '/grade', {
+          method: 'PUT',
+          body: {
+            grade: parseInt(document.getElementById('grade-value').value),
+            feedback: document.getElementById('grade-feedback').value
+          }
+        });
+        closeModal('grade-modal');
+        showToast('Оценка сохранена!', 'success');
+        loadSubmissions();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    async function deleteLesson() {
+      if (!confirm('Удалить урок и все ответы?')) return;
+      try {
+        await api('/lessons/' + lessonId, { method: 'DELETE' });
+        showToast('Урок удалён', 'success');
+        window.location.href = '/admin/classes.html';
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadLesson();
+  </script>
+</body>
+</html>

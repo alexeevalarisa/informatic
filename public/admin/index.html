@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход для учителя — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="text-center mb-24">
+        <div style="font-size:48px;margin-bottom:12px;">👨‍🏫</div>
+        <h2>Вход для учителя</h2>
+        <div class="role-badge">Панель администратора</div>
+      </div>
+
+      <div id="setup-section" class="hidden">
+        <p class="text-center mb-16" style="color:var(--text-light);">Создайте учётную запись администратора</p>
+        <form id="setup-form">
+          <div class="form-group">
+            <label>Логин</label>
+            <input type="text" id="setup-username" required placeholder="admin">
+          </div>
+          <div class="form-group">
+            <label>Пароль</label>
+            <input type="password" id="setup-password" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary">Создать администратора</button>
+        </form>
+      </div>
+
+      <div id="login-section">
+        <form id="login-form">
+          <div class="form-group">
+            <label>Логин</label>
+            <input type="text" id="login-username" required placeholder="Введите логин">
+          </div>
+          <div class="form-group">
+            <label>Пароль</label>
+            <input type="password" id="login-password" required placeholder="Введите пароль">
+          </div>
+          <div id="login-error" class="error-msg"></div>
+          <button type="submit" class="btn btn-primary">Войти</button>
+        </form>
+      </div>
+
+      <a href="/" class="back-link">← На главную</a>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    // Проверяем, есть ли админ
+    async function checkSetup() {
+      try {
+        const stats = await api('/stats');
+        // Если stats работает, значит админ есть
+      } catch (e) {
+        // Показываем форму создания админа
+        document.getElementById('setup-section').classList.remove('hidden');
+        document.getElementById('login-section').classList.add('hidden');
+      }
+    }
+    checkSetup();
+
+    // Создание админа
+    document.getElementById('setup-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        const data = await api('/auth/setup', {
+          method: 'POST',
+          body: {
+            username: document.getElementById('setup-username').value,
+            password: document.getElementById('setup-password').value
+          }
+        });
+        setAuth(data.token, data.user);
+        window.location.href = '/admin/dashboard.html';
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    // Логин
+    document.getElementById('login-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const errorEl = document.getElementById('login-error');
+      errorEl.classList.remove('show');
+
+      try {
+        const data = await api('/auth/login', {
+          method: 'POST',
+          body: {
+            username: document.getElementById('login-username').value,
+            password: document.getElementById('login-password').value
+          }
+        });
+        if (data.user.role !== 'admin') {
+          errorEl.textContent = 'Эта страница только для учителей';
+          errorEl.classList.add('show');
+          return;
+        }
+        setAuth(data.token, data.user);
+        window.location.href = '/admin/dashboard.html';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.add('show');
+      }
+    });
+  </script>
+</body>
+</html>

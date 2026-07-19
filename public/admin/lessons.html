@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Уроки — IT Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">💻</div>
+        <h2>IT Platform</h2>
+        <div class="role">Панель учителя</div>
+      </div>
+      <ul class="nav-menu">
+        <li><a href="/admin/dashboard.html"><span class="icon">📊</span> Обзор</a></li>
+        <li><a href="/admin/classes.html"><span class="icon">🏫</span> Классы</a></li>
+        <li><a href="/admin/students.html"><span class="icon">👨‍🎓</span> Ученики</a></li>
+        <li><a href="/admin/lessons.html" class="active"><span class="icon">📚</span> Уроки</a></li>
+      </ul>
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">👤</div>
+          <div>
+            <div class="user-name" id="user-name">Учитель</div>
+            <div class="user-role">Администратор</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-block" onclick="logout()">🚪 Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Все уроки</h1>
+      </div>
+
+      <div id="lessons-container">
+        <div class="empty-state">
+          <div class="icon">📚</div>
+          <h3>Нет уроков</h3>
+          <p>Создайте урок внутри класса</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user || user.role !== 'admin') window.location.href = '/admin/';
+    else document.getElementById('user-name').textContent = user.name || user.username;
+
+    async function loadAllLessons() {
+      try {
+        const classes = await api('/classes');
+        const container = document.getElementById('lessons-container');
+        let allLessons = [];
+
+        for (const cls of classes) {
+          const lessons = await api('/classes/' + cls.id + '/lessons');
+          lessons.forEach(l => allLessons.push({...l, className: cls.name}));
+        }
+
+        if (allLessons.length === 0) return;
+
+        container.innerHTML = '<div class="grid-2">' + allLessons.map(l => `
+          <div class="lesson-card" onclick="location.href='/admin/lesson-detail.html?id=${l.id}'">
+            <h3>${escapeHtml(l.title)}</h3>
+            <p>${escapeHtml(l.description || 'Без описания')}</p>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <span style="font-size:13px;color:var(--primary);font-weight:500;">${escapeHtml(l.className)}</span>
+              <span style="font-size:12px;color:var(--text-light);">📅 ${formatDate(l.createdAt)}</span>
+            </div>
+          </div>
+        `).join('') + '</div>';
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadAllLessons();
+  </script>
+</body>
+</html>
