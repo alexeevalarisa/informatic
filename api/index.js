@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
@@ -11,48 +12,95 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'it-platform-secret-key-2024';
 
-// In-memory хранилище (для демо; для продакшена используйте MongoDB/PostgreSQL)
-let db = {
-  users: [],
-  classes: [],
-  lessons: [],
-  submissions: [],
-  notes: [],
-  files: []
-};
+// Создаём папку для данных
+const DATA_DIR = process.env.RENDER ? '/tmp' : path.join(__dirname, '..', 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Загрузка данных из файла (если есть)
-const DB_FILE = '/tmp/db.json';
-if (fs.existsSync(DB_FILE)) {
-  try {
-    db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch (e) {
-    console.log('Could not load DB file');
-  }
-}
+const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
 
-function saveDB() {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-  } catch (e) {
-    console.log('Could not save DB');
-  }
-}
+// Подключаем SQLite
+const db = new sqlite3.Database(DB_PATH);
+
+// Создаём таблицы
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL,
+    name TEXT,
+    lastName TEXT,
+    firstName TEXT,
+    classId TEXT,
+    createdAt TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS classes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    createdAt TEXT,
+    createdBy TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS lessons (
+    id TEXT PRIMARY KEY,
+    classId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    content TEXT,
+    createdAt TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS lesson_files (
+    id TEXT PRIMARY KEY,
+    lessonId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT,
+    size INTEGER,
+    data TEXT,
+    uploadedAt TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS submissions (
+    id TEXT PRIMARY KEY,
+    lessonId TEXT NOT NULL,
+    studentId TEXT NOT NULL,
+    text TEXT,
+    fileName TEXT,
+    fileType TEXT,
+    fileSize INTEGER,
+    fileData TEXT,
+    grade INTEGER,
+    feedback TEXT,
+    submittedAt TEXT,
+    gradedAt TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY,
+    classId TEXT,
+    studentId TEXT,
+    content TEXT NOT NULL,
+    createdAt TEXT,
+    createdBy TEXT
+  )`);
+});
 
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Multer для загрузки файлов
+// Multer
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
-// ===== AUTH MIDDLEWARE =====
+// ===== AUTH =====
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Требуется авторизация' });
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
@@ -63,328 +111,239 @@ function authMiddleware(req, res, next) {
 }
 
 function adminOnly(req, res, next) {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Доступ запрещён' });
   next();
 }
 
-// ===== AUTH ROUTES =====
+// ===== HELPERS =====
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
 
-// Регистрация админа (первый запуск)
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+}
+
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+// ===== AUTH ROUTES =====
 app.post('/api/auth/setup', async (req, res) => {
   const { username, password } = req.body;
+  const existing = await dbGet('SELECT * FROM users WHERE role = ?', ['admin']);
+  if (existing) return res.status(400).json({ error: 'Администратор уже создан' });
 
-  const existingAdmin = db.users.find(u => u.role === 'admin');
-  if (existingAdmin) {
-    return res.status(400).json({ error: 'Администратор уже создан' });
-  }
+  const hashed = await bcrypt.hash(password, 10);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO users (id, username, password, role, name, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, username, hashed, 'admin', 'Администратор', now]);
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const admin = {
-    id: uuidv4(),
-    username,
-    password: hashedPassword,
-    role: 'admin',
-    name: 'Администратор',
-    createdAt: new Date().toISOString()
-  };
-
-  db.users.push(admin);
-  saveDB();
-
-  const token = jwt.sign({ id: admin.id, role: admin.role, username: admin.username }, JWT_SECRET);
-  res.json({ token, user: { id: admin.id, username: admin.username, role: admin.role, name: admin.name } });
+  const token = jwt.sign({ id, role: 'admin', username }, JWT_SECRET);
+  res.json({ token, user: { id, username, role: 'admin', name: 'Администратор' } });
 });
 
-// Логин
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-
-  const user = db.users.find(u => u.username === username);
+  const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
   if (!user) return res.status(400).json({ error: 'Неверный логин или пароль' });
 
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(400).json({ error: 'Неверный логин или пароль' });
 
   const token = jwt.sign({ id: user.id, role: user.role, username: user.username }, JWT_SECRET);
-  res.json({ 
-    token, 
-    user: { 
-      id: user.id, 
-      username: user.username, 
-      role: user.role, 
-      name: user.name,
-      classId: user.classId || null
-    } 
+  res.json({
+    token,
+    user: { id: user.id, username: user.username, role: user.role, name: user.name, classId: user.classId }
   });
 });
 
-// Проверка токена
-app.get('/api/auth/me', authMiddleware, (req, res) => {
-  const user = db.users.find(u => u.id === req.user.id);
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  const user = await dbGet('SELECT id, username, role, name, classId FROM users WHERE id = ?', [req.user.id]);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-
-  res.json({ 
-    id: user.id, 
-    username: user.username, 
-    role: user.role, 
-    name: user.name,
-    classId: user.classId || null
-  });
+  res.json(user);
 });
 
-// ===== CLASSES ROUTES =====
-
-// Создать класс
-app.post('/api/classes', authMiddleware, adminOnly, (req, res) => {
+// ===== CLASSES =====
+app.post('/api/classes', authMiddleware, adminOnly, async (req, res) => {
   const { name, description } = req.body;
-
-  const newClass = {
-    id: uuidv4(),
-    name,
-    description: description || '',
-    createdAt: new Date().toISOString(),
-    createdBy: req.user.id
-  };
-
-  db.classes.push(newClass);
-  saveDB();
-  res.json(newClass);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO classes (id, name, description, createdAt, createdBy) VALUES (?, ?, ?, ?, ?)',
+    [id, name, description || '', now, req.user.id]);
+  res.json({ id, name, description: description || '', createdAt: now, createdBy: req.user.id });
 });
 
-// Получить все классы
-app.get('/api/classes', authMiddleware, adminOnly, (req, res) => {
-  res.json(db.classes);
+app.get('/api/classes', authMiddleware, adminOnly, async (req, res) => {
+  const classes = await dbAll('SELECT * FROM classes ORDER BY createdAt DESC');
+  res.json(classes);
 });
 
-// Получить один класс
-app.get('/api/classes/:id', authMiddleware, (req, res) => {
-  const cls = db.classes.find(c => c.id === req.params.id);
+app.get('/api/classes/:id', authMiddleware, async (req, res) => {
+  const cls = await dbGet('SELECT * FROM classes WHERE id = ?', [req.params.id]);
   if (!cls) return res.status(404).json({ error: 'Класс не найден' });
+  if (req.user.role === 'student' && req.user.classId !== cls.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-  // Ученик может видеть только свой класс
-  if (req.user.role === 'student' && req.user.classId !== cls.id) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  const students = db.users.filter(u => u.role === 'student' && u.classId === cls.id);
-  const lessons = db.lessons.filter(l => l.classId === cls.id);
-
+  const students = await dbAll('SELECT id, username, name, lastName, firstName, classId FROM users WHERE role = ? AND classId = ?', ['student', cls.id]);
+  const lessons = await dbAll('SELECT * FROM lessons WHERE classId = ? ORDER BY createdAt DESC', [cls.id]);
   res.json({ ...cls, students, lessons });
 });
 
-// Удалить класс
-app.delete('/api/classes/:id', authMiddleware, adminOnly, (req, res) => {
-  db.classes = db.classes.filter(c => c.id !== req.params.id);
-  db.users = db.users.filter(u => !(u.role === 'student' && u.classId === req.params.id));
-  db.lessons = db.lessons.filter(l => l.classId !== req.params.id);
-  db.notes = db.notes.filter(n => n.classId !== req.params.id);
-  saveDB();
+app.delete('/api/classes/:id', authMiddleware, adminOnly, async (req, res) => {
+  await dbRun('DELETE FROM notes WHERE classId = ?', [req.params.id]);
+  const students = await dbAll('SELECT id FROM users WHERE classId = ?', [req.params.id]);
+  for (const s of students) {
+    await dbRun('DELETE FROM submissions WHERE studentId = ?', [s.id]);
+    await dbRun('DELETE FROM notes WHERE studentId = ?', [s.id]);
+  }
+  await dbRun('DELETE FROM users WHERE classId = ?', [req.params.id]);
+  const lessons = await dbAll('SELECT id FROM lessons WHERE classId = ?', [req.params.id]);
+  for (const l of lessons) {
+    await dbRun('DELETE FROM lesson_files WHERE lessonId = ?', [l.id]);
+    await dbRun('DELETE FROM submissions WHERE lessonId = ?', [l.id]);
+  }
+  await dbRun('DELETE FROM lessons WHERE classId = ?', [req.params.id]);
+  await dbRun('DELETE FROM classes WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
-// ===== STUDENTS ROUTES =====
-
-// Добавить ученика в класс
+// ===== STUDENTS =====
 app.post('/api/classes/:id/students', authMiddleware, adminOnly, async (req, res) => {
   const { lastName, firstName, username, password } = req.body;
   const classId = req.params.id;
 
-  const cls = db.classes.find(c => c.id === classId);
+  const cls = await dbGet('SELECT * FROM classes WHERE id = ?', [classId]);
   if (!cls) return res.status(404).json({ error: 'Класс не найден' });
 
-  const existing = db.users.find(u => u.username === username);
+  const existing = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
   if (existing) return res.status(400).json({ error: 'Логин уже занят' });
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const student = {
-    id: uuidv4(),
-    username,
-    password: hashedPassword,
-    role: 'student',
-    name: `${lastName} ${firstName}`,
-    lastName,
-    firstName,
-    classId,
-    createdAt: new Date().toISOString()
-  };
+  const hashed = await bcrypt.hash(password, 10);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO users (id, username, password, role, name, lastName, firstName, classId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, username, hashed, 'student', `${lastName} ${firstName}`, lastName, firstName, classId, now]);
 
-  db.users.push(student);
-  saveDB();
-  res.json({ 
-    id: student.id, 
-    username: student.username, 
-    name: student.name,
-    lastName: student.lastName,
-    firstName: student.firstName,
-    classId: student.classId,
-    createdAt: student.createdAt
-  });
+  res.json({ id, username, name: `${lastName} ${firstName}`, lastName, firstName, classId, createdAt: now });
 });
 
-// Получить учеников класса
-app.get('/api/classes/:id/students', authMiddleware, (req, res) => {
-  const classId = req.params.id;
-
-  if (req.user.role === 'student' && req.user.classId !== classId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  const students = db.users
-    .filter(u => u.role === 'student' && u.classId === classId)
-    .map(u => ({ id: u.id, username: u.username, name: u.name, lastName: u.lastName, firstName: u.firstName, classId: u.classId }));
-
+app.get('/api/classes/:id/students', authMiddleware, async (req, res) => {
+  if (req.user.role === 'student' && req.user.classId !== req.params.id) return res.status(403).json({ error: 'Доступ запрещён' });
+  const students = await dbAll('SELECT id, username, name, lastName, firstName, classId FROM users WHERE role = ? AND classId = ?', ['student', req.params.id]);
   res.json(students);
 });
 
-// Удалить ученика
-app.delete('/api/students/:id', authMiddleware, adminOnly, (req, res) => {
-  db.users = db.users.filter(u => u.id !== req.params.id);
-  db.submissions = db.submissions.filter(s => s.studentId !== req.params.id);
-  db.notes = db.notes.filter(n => n.studentId !== req.params.id);
-  saveDB();
+app.delete('/api/students/:id', authMiddleware, adminOnly, async (req, res) => {
+  await dbRun('DELETE FROM submissions WHERE studentId = ?', [req.params.id]);
+  await dbRun('DELETE FROM notes WHERE studentId = ?', [req.params.id]);
+  await dbRun('DELETE FROM users WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
-// ===== NOTES ROUTES =====
-
-// Создать заметку
-app.post('/api/notes', authMiddleware, adminOnly, (req, res) => {
+// ===== NOTES =====
+app.post('/api/notes', authMiddleware, adminOnly, async (req, res) => {
   const { classId, studentId, content } = req.body;
-
-  const note = {
-    id: uuidv4(),
-    classId: classId || null,
-    studentId: studentId || null,
-    content,
-    createdAt: new Date().toISOString(),
-    createdBy: req.user.id
-  };
-
-  db.notes.push(note);
-  saveDB();
-  res.json(note);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO notes (id, classId, studentId, content, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, classId || null, studentId || null, content, now, req.user.id]);
+  res.json({ id, classId: classId || null, studentId: studentId || null, content, createdAt: now });
 });
 
-// Получить заметки (только админ)
-app.get('/api/notes', authMiddleware, adminOnly, (req, res) => {
+app.get('/api/notes', authMiddleware, adminOnly, async (req, res) => {
   const { classId, studentId } = req.query;
-  let notes = db.notes;
-
-  if (classId) notes = notes.filter(n => n.classId === classId);
-  if (studentId) notes = notes.filter(n => n.studentId === studentId);
-
+  let sql = 'SELECT * FROM notes WHERE 1=1';
+  const params = [];
+  if (classId) { sql += ' AND classId = ?'; params.push(classId); }
+  if (studentId) { sql += ' AND studentId = ?'; params.push(studentId); }
+  sql += ' ORDER BY createdAt DESC';
+  const notes = await dbAll(sql, params);
   res.json(notes);
 });
 
-// Удалить заметку
-app.delete('/api/notes/:id', authMiddleware, adminOnly, (req, res) => {
-  db.notes = db.notes.filter(n => n.id !== req.params.id);
-  saveDB();
+app.delete('/api/notes/:id', authMiddleware, adminOnly, async (req, res) => {
+  await dbRun('DELETE FROM notes WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
-// ===== LESSONS ROUTES =====
-
-// Создать урок
-app.post('/api/lessons', authMiddleware, adminOnly, (req, res) => {
+// ===== LESSONS =====
+app.post('/api/lessons', authMiddleware, adminOnly, async (req, res) => {
   const { classId, title, description, content } = req.body;
-
-  const lesson = {
-    id: uuidv4(),
-    classId,
-    title,
-    description: description || '',
-    content: content || '',
-    files: [],
-    createdAt: new Date().toISOString()
-  };
-
-  db.lessons.push(lesson);
-  saveDB();
-  res.json(lesson);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO lessons (id, classId, title, description, content, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, classId, title, description || '', content || '', now]);
+  res.json({ id, classId, title, description: description || '', content: content || '', createdAt: now });
 });
 
-// Получить уроки класса
-app.get('/api/classes/:id/lessons', authMiddleware, (req, res) => {
-  const classId = req.params.id;
-
-  if (req.user.role === 'student' && req.user.classId !== classId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  const lessons = db.lessons.filter(l => l.classId === classId);
+app.get('/api/classes/:id/lessons', authMiddleware, async (req, res) => {
+  if (req.user.role === 'student' && req.user.classId !== req.params.id) return res.status(403).json({ error: 'Доступ запрещён' });
+  const lessons = await dbAll('SELECT * FROM lessons WHERE classId = ? ORDER BY createdAt DESC', [req.params.id]);
   res.json(lessons);
 });
 
-// Получить один урок
-app.get('/api/lessons/:id', authMiddleware, (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.id);
+app.get('/api/lessons/:id', authMiddleware, async (req, res) => {
+  const lesson = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.id]);
   if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
+  if (req.user.role === 'student' && req.user.classId !== lesson.classId) return res.status(403).json({ error: 'Доступ запрещён' });
 
-  if (req.user.role === 'student' && req.user.classId !== lesson.classId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  res.json(lesson);
+  const files = await dbAll('SELECT id, name, type, size, uploadedAt FROM lesson_files WHERE lessonId = ?', [req.params.id]);
+  res.json({ ...lesson, files });
 });
 
-// Обновить урок
-app.put('/api/lessons/:id', authMiddleware, adminOnly, (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.id);
-  if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
-
+app.put('/api/lessons/:id', authMiddleware, adminOnly, async (req, res) => {
   const { title, description, content } = req.body;
-  if (title) lesson.title = title;
-  if (description !== undefined) lesson.description = description;
-  if (content !== undefined) lesson.content = content;
-
-  saveDB();
-  res.json(lesson);
+  const lesson = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.id]);
+  if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
+  await dbRun('UPDATE lessons SET title = ?, description = ?, content = ? WHERE id = ?',
+    [title || lesson.title, description !== undefined ? description : lesson.description, content !== undefined ? content : lesson.content, req.params.id]);
+  const updated = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.id]);
+  const files = await dbAll('SELECT id, name, type, size, uploadedAt FROM lesson_files WHERE lessonId = ?', [req.params.id]);
+  res.json({ ...updated, files });
 });
 
-// Удалить урок
-app.delete('/api/lessons/:id', authMiddleware, adminOnly, (req, res) => {
-  db.lessons = db.lessons.filter(l => l.id !== req.params.id);
-  db.submissions = db.submissions.filter(s => s.lessonId !== req.params.id);
-  saveDB();
+app.delete('/api/lessons/:id', authMiddleware, adminOnly, async (req, res) => {
+  await dbRun('DELETE FROM lesson_files WHERE lessonId = ?', [req.params.id]);
+  await dbRun('DELETE FROM submissions WHERE lessonId = ?', [req.params.id]);
+  await dbRun('DELETE FROM lessons WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
-// ===== FILES ROUTES =====
-
-// Загрузить файл к уроку
-app.post('/api/lessons/:id/files', authMiddleware, adminOnly, upload.single('file'), (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.id);
+// ===== FILES =====
+app.post('/api/lessons/:id/files', authMiddleware, adminOnly, upload.single('file'), async (req, res) => {
+  const lesson = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.id]);
   if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
-
   if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
 
-  const fileData = {
-    id: uuidv4(),
-    name: req.file.originalname,
-    type: req.file.mimetype,
-    size: req.file.size,
-    data: req.file.buffer.toString('base64'),
-    uploadedAt: new Date().toISOString()
-  };
-
-  lesson.files.push(fileData);
-  saveDB();
-  res.json(fileData);
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await dbRun('INSERT INTO lesson_files (id, lessonId, name, type, size, data, uploadedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer.toString('base64'), now]);
+  res.json({ id, name: req.file.originalname, type: req.file.mimetype, size: req.file.size, uploadedAt: now });
 });
 
-// Скачать файл
-app.get('/api/files/:lessonId/:fileId', authMiddleware, (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.lessonId);
+app.get('/api/files/:lessonId/:fileId', authMiddleware, async (req, res) => {
+  const lesson = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.lessonId]);
   if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
+  if (req.user.role === 'student' && req.user.classId !== lesson.classId) return res.status(403).json({ error: 'Доступ запрещён' });
 
-  if (req.user.role === 'student' && req.user.classId !== lesson.classId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  const file = lesson.files.find(f => f.id === req.params.fileId);
+  const file = await dbGet('SELECT * FROM lesson_files WHERE id = ? AND lessonId = ?', [req.params.fileId, req.params.lessonId]);
   if (!file) return res.status(404).json({ error: 'Файл не найден' });
 
   const buffer = Buffer.from(file.data, 'base64');
@@ -393,153 +352,111 @@ app.get('/api/files/:lessonId/:fileId', authMiddleware, (req, res) => {
   res.send(buffer);
 });
 
-// Удалить файл
-app.delete('/api/lessons/:lessonId/files/:fileId', authMiddleware, adminOnly, (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.lessonId);
-  if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
-
-  lesson.files = lesson.files.filter(f => f.id !== req.params.fileId);
-  saveDB();
+app.delete('/api/lessons/:lessonId/files/:fileId', authMiddleware, adminOnly, async (req, res) => {
+  await dbRun('DELETE FROM lesson_files WHERE id = ? AND lessonId = ?', [req.params.fileId, req.params.lessonId]);
   res.json({ success: true });
 });
 
-// ===== SUBMISSIONS ROUTES =====
-
-// Ученик загружает ответ
-app.post('/api/lessons/:id/submissions', authMiddleware, upload.single('file'), (req, res) => {
-  const lesson = db.lessons.find(l => l.id === req.params.id);
+// ===== SUBMISSIONS =====
+app.post('/api/lessons/:id/submissions', authMiddleware, upload.single('file'), async (req, res) => {
+  const lesson = await dbGet('SELECT * FROM lessons WHERE id = ?', [req.params.id]);
   if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
+  if (req.user.role !== 'student') return res.status(403).json({ error: 'Только ученики могут отправлять ответы' });
+  if (req.user.classId !== lesson.classId) return res.status(403).json({ error: 'Доступ запрещён' });
 
-  if (req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Только ученики могут отправлять ответы' });
-  }
+  await dbRun('DELETE FROM submissions WHERE lessonId = ? AND studentId = ?', [req.params.id, req.user.id]);
 
-  if (req.user.classId !== lesson.classId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const file = req.file ? {
+    name: req.file.originalname,
+    type: req.file.mimetype,
+    size: req.file.size,
+    data: req.file.buffer.toString('base64')
+  } : null;
 
-  // Удаляем предыдущую отправку этого ученика
-  db.submissions = db.submissions.filter(s => !(s.lessonId === req.params.id && s.studentId === req.user.id));
+  await dbRun('INSERT INTO submissions (id, lessonId, studentId, text, fileName, fileType, fileSize, fileData, grade, feedback, submittedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, req.params.id, req.user.id, req.body.text || '', file ? file.name : null, file ? file.type : null, file ? file.size : null, file ? file.data : null, null, null, now]);
 
-  const submission = {
-    id: uuidv4(),
-    lessonId: req.params.id,
-    studentId: req.user.id,
-    text: req.body.text || '',
-    file: req.file ? {
-      name: req.file.originalname,
-      type: req.file.mimetype,
-      size: req.file.size,
-      data: req.file.buffer.toString('base64')
-    } : null,
-    grade: null,
-    feedback: '',
-    submittedAt: new Date().toISOString()
-  };
-
-  db.submissions.push(submission);
-  saveDB();
-  res.json(submission);
+  res.json({ id, lessonId: req.params.id, studentId: req.user.id, text: req.body.text || '', file, grade: null, feedback: '', submittedAt: now });
 });
 
-// Получить ответы на урок (админ)
-app.get('/api/lessons/:id/submissions', authMiddleware, adminOnly, (req, res) => {
-  const submissions = db.submissions.filter(s => s.lessonId === req.params.id);
-
-  // Добавляем информацию об учениках
-  const result = submissions.map(s => {
-    const student = db.users.find(u => u.id === s.studentId);
-    return {
+app.get('/api/lessons/:id/submissions', authMiddleware, adminOnly, async (req, res) => {
+  const submissions = await dbAll('SELECT * FROM submissions WHERE lessonId = ? ORDER BY submittedAt DESC', [req.params.id]);
+  const result = [];
+  for (const s of submissions) {
+    const student = await dbGet('SELECT name, username FROM users WHERE id = ?', [s.studentId]);
+    result.push({
       ...s,
       studentName: student ? student.name : 'Неизвестно',
-      studentUsername: student ? student.username : ''
-    };
-  });
-
+      studentUsername: student ? student.username : '',
+      file: s.fileName ? { name: s.fileName, type: s.fileType, size: s.fileSize } : null
+    });
+  }
   res.json(result);
 });
 
-// Получить свои ответы (ученик)
-app.get('/api/my-submissions', authMiddleware, (req, res) => {
-  if (req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  const submissions = db.submissions.filter(s => s.studentId === req.user.id);
-  res.json(submissions);
+app.get('/api/my-submissions', authMiddleware, async (req, res) => {
+  if (req.user.role !== 'student') return res.status(403).json({ error: 'Доступ запрещён' });
+  const submissions = await dbAll('SELECT * FROM submissions WHERE studentId = ? ORDER BY submittedAt DESC', [req.user.id]);
+  res.json(submissions.map(s => ({
+    ...s,
+    file: s.fileName ? { name: s.fileName, type: s.fileType, size: s.fileSize } : null
+  })));
 });
 
-// Оценить ответ
-app.put('/api/submissions/:id/grade', authMiddleware, adminOnly, (req, res) => {
+app.put('/api/submissions/:id/grade', authMiddleware, adminOnly, async (req, res) => {
   const { grade, feedback } = req.body;
-
-  const submission = db.submissions.find(s => s.id === req.params.id);
-  if (!submission) return res.status(404).json({ error: 'Ответ не найден' });
-
-  submission.grade = grade;
-  submission.feedback = feedback || '';
-  submission.gradedAt = new Date().toISOString();
-
-  saveDB();
-  res.json(submission);
+  const now = new Date().toISOString();
+  await dbRun('UPDATE submissions SET grade = ?, feedback = ?, gradedAt = ? WHERE id = ?',
+    [grade, feedback || '', now, req.params.id]);
+  const sub = await dbGet('SELECT * FROM submissions WHERE id = ?', [req.params.id]);
+  res.json({ ...sub, file: sub.fileName ? { name: sub.fileName, type: sub.fileType, size: sub.fileSize } : null });
 });
 
-// Скачать файл ответа
-app.get('/api/submissions/:id/file', authMiddleware, (req, res) => {
-  const submission = db.submissions.find(s => s.id === req.params.id);
-  if (!submission) return res.status(404).json({ error: 'Ответ не найден' });
+app.get('/api/submissions/:id/file', authMiddleware, async (req, res) => {
+  const sub = await dbGet('SELECT * FROM submissions WHERE id = ?', [req.params.id]);
+  if (!sub) return res.status(404).json({ error: 'Ответ не найден' });
+  if (req.user.role === 'student' && req.user.id !== sub.studentId) return res.status(403).json({ error: 'Доступ запрещён' });
+  if (!sub.fileData) return res.status(404).json({ error: 'Файл не найден' });
 
-  if (req.user.role === 'student' && req.user.id !== submission.studentId) {
-    return res.status(403).json({ error: 'Доступ запрещён' });
-  }
-
-  if (!submission.file) return res.status(404).json({ error: 'Файл не найден' });
-
-  const buffer = Buffer.from(submission.file.data, 'base64');
-  res.setHeader('Content-Type', submission.file.type);
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(submission.file.name)}"`);
+  const buffer = Buffer.from(sub.fileData, 'base64');
+  res.setHeader('Content-Type', sub.fileType);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(sub.fileName)}"`);
   res.send(buffer);
 });
 
-// ===== EXPORT ROUTES =====
-
-// Экспорт логинов и паролей класса
-app.get('/api/classes/:id/export', authMiddleware, adminOnly, (req, res) => {
-  const cls = db.classes.find(c => c.id === req.params.id);
+// ===== EXPORT =====
+app.get('/api/classes/:id/export', authMiddleware, adminOnly, async (req, res) => {
+  const cls = await dbGet('SELECT * FROM classes WHERE id = ?', [req.params.id]);
   if (!cls) return res.status(404).json({ error: 'Класс не найден' });
-
-  const students = db.users.filter(u => u.role === 'student' && u.classId === req.params.id);
-
-  const data = students.map(s => ({
-    Фамилия: s.lastName,
-    Имя: s.firstName,
-    Логин: s.username,
-    Пароль: '********' // Пароли хешированы, показываем звёздочки
-  }));
-
-  res.json({ className: cls.name, students: data });
+  const students = await dbAll('SELECT lastName, firstName, username FROM users WHERE role = ? AND classId = ?', ['student', req.params.id]);
+  res.json({ className: cls.name, students: students.map(s => ({ Фамилия: s.lastName, Имя: s.firstName, Логин: s.username, Пароль: '********' })) });
 });
 
 // ===== STATS =====
-app.get('/api/stats', authMiddleware, adminOnly, (req, res) => {
+app.get('/api/stats', authMiddleware, adminOnly, async (req, res) => {
+  const classes = await dbGet('SELECT COUNT(*) as c FROM classes');
+  const students = await dbGet('SELECT COUNT(*) as c FROM users WHERE role = ?', ['student']);
+  const lessons = await dbGet('SELECT COUNT(*) as c FROM lessons');
+  const submissions = await dbGet('SELECT COUNT(*) as c FROM submissions');
   res.json({
-    totalClasses: db.classes.length,
-    totalStudents: db.users.filter(u => u.role === 'student').length,
-    totalLessons: db.lessons.length,
-    totalSubmissions: db.submissions.length
+    totalClasses: classes.c,
+    totalStudents: students.c,
+    totalLessons: lessons.c,
+    totalSubmissions: submissions.c
   });
 });
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}
+// Catch-all для SPA
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
-module.exports = app;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
